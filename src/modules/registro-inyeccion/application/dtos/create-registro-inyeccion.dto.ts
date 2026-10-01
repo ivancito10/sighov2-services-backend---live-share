@@ -12,6 +12,7 @@ export class CreateRegistroInyeccionDto {
     @IsInt()
     idEspecialista?: number;
 
+    // Se mantienen opcionales en cabecera por compatibilidad
     @IsOptional()
     @IsInt()
     idViaParenteral?: number;

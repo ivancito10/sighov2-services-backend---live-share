@@ -3,25 +3,25 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DB_CONNECTIONS } from '../../../../config/database.constants';
 import {
-    ParametrosRegistroInyeccion,
-    RegistroInyeccionRepositoryPort,
+  ParametrosRegistroInyeccion,
+  RegistroInyeccionRepositoryPort,
 } from '../../domain/ports/registro-inyeccion.repository.port';
 
 @Injectable()
 export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRepositoryPort {
-    constructor(
-        @InjectDataSource(DB_CONNECTIONS.ETAPA2)
-        private readonly dataSource: DataSource,
-    ) { }
+  constructor(
+    @InjectDataSource(DB_CONNECTIONS.ETAPA2)
+    private readonly dataSource: DataSource,
+  ) { }
 
-    async crearTransaccionCompleta(datos: ParametrosRegistroInyeccion) {
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
+  async crearTransaccionCompleta(datos: ParametrosRegistroInyeccion) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-        try {
-            // 1. Insertar Cabecera: registro_inyeccion
-            const queryInyeccion = `
+    try {
+      // 1. Insertar Cabecera: registro_inyeccion
+      const queryInyeccion = `
         INSERT INTO enfermeria.registro_inyeccion (
           id_persona, 
           id_especialista, 
@@ -36,47 +36,57 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
         RETURNING id;
       `;
 
-            const resInyeccion = await queryRunner.query(queryInyeccion, [
-                datos.idPersona,
-                datos.idEspecialista ?? null,
-                datos.idViaParenteral ?? null,
-                datos.idReceta ?? null,
-                datos.idRecetaManual ?? null,
-                datos.idUsuario ?? null,
-            ]);
+      const resInyeccion = await queryRunner.query(queryInyeccion, [
+        datos.idPersona,
+        datos.idEspecialista ?? null,
+        datos.idViaParenteral ?? null,
+        datos.idReceta ?? null,
+        datos.idRecetaManual ?? null,
+        datos.idUsuario ?? null,
+      ]);
 
-            const idRegistroInyeccion = resInyeccion[0].id;
+      const idRegistroInyeccion = resInyeccion[0].id;
 
-            // 2. Insertar Detalle de Medicamentos
-            let totalMedicamentos = 0;
-            if (datos.medicamentos && datos.medicamentos.length > 0) {
-                for (const med of datos.medicamentos) {
-                    const queryMed = `
-            INSERT INTO enfermeria.registro_inyeccion_medicamento (
-              id_registro_inyeccion,
-              id_medicamento,
-              observacion,
-              estado,
-              id_user_created,
-              created_at,
-              updated_at
-            ) VALUES ($1, $2, $3, true, $4, NOW(), NOW());
-          `;
-                    await queryRunner.query(queryMed, [
-                        idRegistroInyeccion,
-                        med.idMedicamento,
-                        med.observacion ?? null,
-                        datos.idUsuario ?? null,
-                    ]);
-                    totalMedicamentos++;
-                }
-            }
+      // 2. Insertar Detalle de Medicamentos
+      let totalMedicamentos = 0;
+      if (datos.medicamentos && datos.medicamentos.length > 0) {
+        for (const med of datos.medicamentos) {
+          // Armamos una observación compuesta para registrar la vía o receta si vino especificada en la fila
+          const detallesFila = [
+            med.observacion ? med.observacion.trim() : null,
+            med.idViaParenteral ? `Vía: ${med.idViaParenteral}` : null,
+            med.idReceta ? `Receta: ${med.idReceta}` : null,
+            med.idRecetaManual ? `Receta Manual: ${med.idRecetaManual}` : null,
+            med.cantidad ? `Cant: ${med.cantidad}` : null,
+          ].filter(Boolean).join(' | ');
 
-            // 3. Insertar Checklist de Procedimientos
-            let procedimientosRegistrados = false;
-            if (datos.procedimientos) {
-                const p = datos.procedimientos;
-                const queryProc = `
+          const queryMed = `
+                        INSERT INTO enfermeria.registro_inyeccion_medicamento (
+                            id_registro_inyeccion,
+                            id_medicamento,
+                            observacion,
+                            estado,
+                            id_user_created,
+                            created_at,
+                            updated_at
+                        ) VALUES ($1, $2, $3, true, $4, NOW(), NOW());
+                    `;
+
+          await queryRunner.query(queryMed, [
+            idRegistroInyeccion,
+            med.idMedicamento,
+            detallesFila || null,
+            datos.idUsuario ?? null,
+          ]);
+          totalMedicamentos++;
+        }
+      }
+
+      // 3. Insertar Checklist de Procedimientos
+      let procedimientosRegistrados = false;
+      if (datos.procedimientos) {
+        const p = datos.procedimientos;
+        const queryProc = `
           INSERT INTO enfermeria.registro_inyeccion_procedimiento (
             id_registro_inyeccion,
             curacion_plana,
@@ -100,45 +110,45 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, $15, NOW(), NOW()
           );
         `;
-                await queryRunner.query(queryProc, [
-                    idRegistroInyeccion,
-                    p.curacionPlana ?? false,
-                    p.curacionInfectada ?? false,
-                    p.oxigenoterapia ?? false,
-                    p.retiroPuntos ?? false,
-                    p.pruebaSensibilidad ?? false,
-                    p.sangria ?? false,
-                    p.signosVitales ?? false,
-                    p.txVo ?? false,
-                    p.orientacionSalud ?? false,
-                    p.vendajes ?? false,
-                    p.nebulizacion ?? false,
-                    p.otros ?? null,
-                    p.observaciones ?? null,
-                    datos.idUsuario ?? null,
-                ]);
-                procedimientosRegistrados = true;
-            }
+        await queryRunner.query(queryProc, [
+          idRegistroInyeccion,
+          p.curacionPlana ?? false,
+          p.curacionInfectada ?? false,
+          p.oxigenoterapia ?? false,
+          p.retiroPuntos ?? false,
+          p.pruebaSensibilidad ?? false,
+          p.sangria ?? false,
+          p.signosVitales ?? false,
+          p.txVo ?? false,
+          p.orientacionSalud ?? false,
+          p.vendajes ?? false,
+          p.nebulizacion ?? false,
+          p.otros ?? null,
+          p.observaciones ?? null,
+          datos.idUsuario ?? null,
+        ]);
+        procedimientosRegistrados = true;
+      }
 
-            await queryRunner.commitTransaction();
+      await queryRunner.commitTransaction();
 
-            return {
-                idRegistroInyeccion,
-                totalMedicamentos,
-                procedimientosRegistrados,
-            };
-        } catch (error: any) {
-            await queryRunner.rollbackTransaction();
-            throw new InternalServerErrorException(
-                `Error al registrar inyección y procedimientos: ${error.message}`,
-            );
-        } finally {
-            await queryRunner.release();
-        }
+      return {
+        idRegistroInyeccion,
+        totalMedicamentos,
+        procedimientosRegistrados,
+      };
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      throw new InternalServerErrorException(
+        `Error al registrar inyección y procedimientos: ${error.message}`,
+      );
+    } finally {
+      await queryRunner.release();
     }
+  }
 
-    async buscarPorPaciente(idPersona: number) {
-        const query = `
+  async buscarPorPaciente(idPersona: number) {
+    const query = `
       SELECT 
         ri.id,
         ri.id_persona,
@@ -167,11 +177,11 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
       WHERE ri.id_persona = $1 AND ri.estado = true
       ORDER BY ri.created_at DESC;
     `;
-        return await this.dataSource.query(query, [idPersona]);
-    }
+    return await this.dataSource.query(query, [idPersona]);
+  }
 
-    async buscarPorId(id: number) {
-        const query = `
+  async buscarPorId(id: number) {
+    const query = `
       SELECT 
         ri.*,
         vp.nombre AS via_parenteral_nombre
@@ -180,7 +190,7 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
       WHERE ri.id = $1 AND ri.estado = true
       LIMIT 1;
     `;
-        const rows = await this.dataSource.query(query, [id]);
-        return rows.length > 0 ? rows[0] : null;
-    }
+    const rows = await this.dataSource.query(query, [id]);
+    return rows.length > 0 ? rows[0] : null;
+  }
 }

@@ -6,6 +6,22 @@ export class MedicamentoAplicadoDto {
     idMedicamento: number;
 
     @IsOptional()
+    @IsInt()
+    idViaParenteral?: number;
+
+    @IsOptional()
+    @IsInt()
+    idReceta?: number;
+
+    @IsOptional()
+    @IsInt()
+    idRecetaManual?: number;
+
+    @IsOptional()
+    @IsInt()
+    cantidad?: number;
+
+    @IsOptional()
     @IsString()
     observacion?: string;
 }
