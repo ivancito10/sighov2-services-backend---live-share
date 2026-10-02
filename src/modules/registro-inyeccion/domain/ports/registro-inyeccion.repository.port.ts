@@ -22,4 +22,9 @@ export abstract class RegistroInyeccionRepositoryPort {
     abstract crearTransaccionCompleta(datos: ParametrosRegistroInyeccion): Promise<any>;
     abstract buscarPorPaciente(idPersona: number): Promise<any[]>;
     abstract buscarPorId(id: number): Promise<any | null>;
+
+    // Nuevos métodos para el listado y visualización:
+    abstract listarRegistros(buscar?: string, limite?: number): Promise<any[]>;
+    abstract obtenerDetalleCompleto(idRegistro: number): Promise<any | null>;
+    abstract cambiarEstado(idRegistro: number, estado: boolean, idUsuario?: number): Promise<boolean>;
 }

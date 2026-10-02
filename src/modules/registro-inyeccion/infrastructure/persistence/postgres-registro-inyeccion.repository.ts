@@ -193,4 +193,147 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
     const rows = await this.dataSource.query(query, [id]);
     return rows.length > 0 ? rows[0] : null;
   }
+
+  // 1. Listar para la tabla principal (con buscador)
+  // 1. Listar para la tabla principal (con buscador)
+  async listarRegistros(buscar?: string, limite: number = 50): Promise<any[]> {
+    const queryInyecciones = `
+            SELECT 
+                ri.id,
+                ri.id_persona,
+                ri.id_especialista,
+                ri.id_via_parenteral,
+                ri.id_receta,
+                ri.id_receta_manual,
+                ri.estado,
+                ri.created_at
+            FROM enfermeria.registro_inyeccion ri
+            ORDER BY ri.id DESC
+            LIMIT $1;
+        `;
+    const inyecciones = await this.dataSource.query(queryInyecciones, [limite * 2]);
+
+    if (!inyecciones || inyecciones.length === 0) return [];
+
+    const idsPersona = Array.from(new Set(inyecciones.map((r: any) => r.id_persona)));
+
+    const queryPersonas = `
+            SELECT 
+                p.id,
+                TRIM(CONCAT(p.nombres, ' ', p.p_apellido, ' ', COALESCE(p.s_apellido, ''))) AS nombre_paciente,
+                COALESCE(p.ci, '') AS ci,
+                COALESCE(p.matricula_seguro, '') AS matricula
+            FROM administracion.persona p
+            WHERE p.id = ANY($1);
+        `;
+
+    const personasMap = new Map<number, any>();
+    try {
+      const personasRows = await this.dataSource.query(queryPersonas, [idsPersona]);
+      for (const per of personasRows) {
+        personasMap.set(per.id, per);
+      }
+    } catch {
+      // Manejo preventivo si personas se encuentra en otra base
+    }
+
+    const resultado = inyecciones.map((ri: any) => {
+      const persona = personasMap.get(ri.id_persona) || {
+        nombre_paciente: 'PACIENTE SSU',
+        ci: String(ri.id_persona),
+        matricula: String(ri.id_persona),
+      };
+
+      const nroReceta = ri.id_receta ? String(ri.id_receta) : 'S/N';
+      const esRecetaManual = !ri.id_receta;
+
+      return {
+        id: ri.id,
+        nombre_paciente: persona.nombre_paciente,
+        ci: persona.ci,
+        matricula: persona.matricula,
+        nro_receta: nroReceta,
+        es_manual: esRecetaManual,
+        estado: ri.estado,
+        fecha_registro: ri.created_at,
+      };
+    });
+
+    if (buscar && buscar.trim().length > 0) {
+      const term = buscar.trim().toUpperCase();
+      return resultado.filter((item: any) =>
+        item.nombre_paciente.toUpperCase().includes(term) ||
+        item.ci.includes(term) ||
+        item.matricula.toUpperCase().includes(term) ||
+        item.nro_receta.toUpperCase().includes(term),
+      ).slice(0, limite);
+    }
+
+    return resultado.slice(0, limite);
+  }
+
+  // 2. Obtener el detalle completo para el modal "Ver" o para cargar "Editar"
+  async obtenerDetalleCompleto(idRegistro: number): Promise<any | null> {
+    const queryCab = `
+            SELECT 
+                ri.id,
+                ri.id_persona,
+                ri.id_especialista,
+                ri.id_via_parenteral,
+                vp.nombre AS via_parenteral_nombre,
+                ri.id_receta,
+                ri.id_receta_manual,
+                ri.estado,
+                ri.created_at
+            FROM enfermeria.registro_inyeccion ri
+            LEFT JOIN enfermeria.via_parenteral vp ON vp.id = ri.id_via_parenteral
+            WHERE ri.id = $1
+            LIMIT 1;
+        `;
+    const cabRows = await this.dataSource.query(queryCab, [idRegistro]);
+    if (!cabRows || cabRows.length === 0) return null;
+    const cabecera = cabRows[0];
+
+    const queryMeds = `
+            SELECT 
+                rim.id,
+                rim.id_medicamento,
+                fm.nombre AS medicamento_nombre,
+                rim.observacion,
+                rim.estado
+            FROM enfermeria.registro_inyeccion_medicamento rim
+            LEFT JOIN farmacia.medicamento fm ON fm.id = rim.id_medicamento
+            WHERE rim.id_registro_inyeccion = $1 AND rim.estado = true;
+        `;
+    const medicamentos = await this.dataSource.query(queryMeds, [idRegistro]);
+
+    const queryProc = `
+            SELECT 
+                rip.*
+            FROM enfermeria.registro_inyeccion_procedimiento rip
+            WHERE rip.id_registro_inyeccion = $1 AND rip.estado = true
+            LIMIT 1;
+        `;
+    const procRows = await this.dataSource.query(queryProc, [idRegistro]);
+    const procedimientos = procRows.length > 0 ? procRows[0] : null;
+
+    return {
+      ...cabecera,
+      es_receta_manual: !cabecera.id_receta,
+      permite_editar_todo: !cabecera.id_receta,
+      medicamentos,
+      procedimientos,
+    };
+  }
+
+  // 3. Cambiar estado (Activar / Anular)
+  async cambiarEstado(idRegistro: number, estado: boolean, idUsuario?: number): Promise<boolean> {
+    const query = `
+            UPDATE enfermeria.registro_inyeccion
+            SET estado = $1, id_user_updated = $2, updated_at = NOW()
+            WHERE id = $3;
+        `;
+    const res = await this.dataSource.query(query, [estado, idUsuario ?? null, idRegistro]);
+    return res[1] > 0;
+  }
 }
