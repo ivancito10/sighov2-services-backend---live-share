@@ -18,10 +18,6 @@ export class MedicamentoAplicadoDto {
     idRecetaManual?: number;
 
     @IsOptional()
-    @IsInt()
-    cantidad?: number;
-
-    @IsOptional()
     @IsString()
     observacion?: string;
 }

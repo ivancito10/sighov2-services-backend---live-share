@@ -1,9 +1,10 @@
-import { Controller, Post, Get, Patch, Body, Param, ParseIntPipe, Query, NotFoundException, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Put, Body, Param, ParseIntPipe, Query, NotFoundException, UseGuards, Req } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateRegistroInyeccionUseCase } from '../../application/use-cases/create-registro-inyeccion.use-case';
 import { GetRegistrosInyeccionPacienteUseCase } from '../../application/use-cases/get-registros-inyeccion-paciente.use-case';
 import { RegistroInyeccionRepositoryPort } from '../../domain/ports/registro-inyeccion.repository.port';
 import { CreateRegistroInyeccionDto } from '../../application/dtos/create-registro-inyeccion.dto';
+import { UpdateRegistroInyeccionDto } from '../../application/dtos/update-registro-inyeccion.dto';
 
 
 @Controller('enfermeria/inyecciones')
@@ -76,6 +77,22 @@ export class RegistroInyeccionController {
             message: estado
                 ? 'Registro activado'
                 : 'Registro anulado correctamente',
+        };
+    }
+
+    // PUT /api/enfermeria/inyecciones/:id (Para guardar la edición desde el botón ✏️)
+    @Put(':id')
+    async actualizar(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdateRegistroInyeccionDto,
+        @Req() req: any,
+    ) {
+        const idUsuario = req.user?.id;
+        const actualizado = await this.inyeccionRepo.actualizarTransaccion(id, dto, idUsuario);
+        return {
+            status: 200,
+            success: actualizado,
+            message: 'Registro de inyección actualizado correctamente',
         };
     }
 }

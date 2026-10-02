@@ -336,4 +336,168 @@ export class PostgresRegistroInyeccionRepository implements RegistroInyeccionRep
     const res = await this.dataSource.query(query, [estado, idUsuario ?? null, idRegistro]);
     return res[1] > 0;
   }
+
+  async actualizarTransaccion(idRegistro: number, datos: any, idUsuario?: number): Promise<boolean> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Obtener el registro actual para saber si es de Sistema o Manual
+      const checkQuery = `
+      SELECT id, id_persona, id_especialista, id_via_parenteral, id_receta, id_receta_manual 
+      FROM enfermeria.registro_inyeccion 
+      WHERE id = $1 AND estado = true;
+    `;
+      const checkRows = await queryRunner.query(checkQuery, [idRegistro]);
+      if (!checkRows || checkRows.length === 0) {
+        throw new Error(`Registro de inyección #${idRegistro} no encontrado o inactivo`);
+      }
+
+      const registroActual = checkRows[0];
+      const esRecetaSistema = Boolean(registroActual.id_receta);
+
+      // 2. Actualización de Cabecera según el tipo de receta
+      if (esRecetaSistema) {
+        // CASO SISTEMA: Paciente y Especialista quedan intactos. Solo se actualiza la vía principal.
+        const updateCabeceraSistema = `
+        UPDATE enfermeria.registro_inyeccion
+        SET id_via_parenteral = COALESCE($1, id_via_parenteral),
+            id_user_updated = $2,
+            updated_at = NOW()
+        WHERE id = $3;
+      `;
+        await queryRunner.query(updateCabeceraSistema, [
+          datos.idViaParenteral ?? null,
+          idUsuario ?? null,
+          idRegistro,
+        ]);
+      } else {
+        // CASO MANUAL (Imagen 3): Se puede editar TODO (paciente, médico, vía)
+        const updateCabeceraManual = `
+        UPDATE enfermeria.registro_inyeccion
+        SET id_persona = COALESCE($1, id_persona),
+            id_especialista = COALESCE($2, id_especialista),
+            id_via_parenteral = COALESCE($3, id_via_parenteral),
+            id_user_updated = $4,
+            updated_at = NOW()
+        WHERE id = $5;
+      `;
+        await queryRunner.query(updateCabeceraManual, [
+          datos.idPersona ?? null,
+          datos.idEspecialista ?? null,
+          datos.idViaParenteral ?? null,
+          idUsuario ?? null,
+          idRegistro,
+        ]);
+
+        // Si tiene receta manual asociada, actualizamos también el registro en enfermeria.receta_manual
+        if (registroActual.id_receta_manual) {
+          const updateRecetaManual = `
+          UPDATE enfermeria.receta_manual
+          SET id_persona = COALESCE($1, id_persona),
+              id_especialista = COALESCE($2, id_especialista),
+              fecha_receta = COALESCE($3, fecha_receta),
+              id_user_updated = $4,
+              updated_at = NOW()
+          WHERE id = $5;
+        `;
+          await queryRunner.query(updateRecetaManual, [
+            datos.idPersona ?? null,
+            datos.idEspecialista ?? null,
+            datos.fechaReceta ?? null,
+            idUsuario ?? null,
+            registroActual.id_receta_manual,
+          ]);
+        }
+      }
+
+      // 3. Actualización de la Tabla de Medicamentos Aplicados
+      if (datos.medicamentos && datos.medicamentos.length > 0) {
+        // Desactivamos lógicamente los medicamentos previos vinculados a esta inyección
+        await queryRunner.query(
+          `UPDATE enfermeria.registro_inyeccion_medicamento 
+         SET estado = false, id_user_updated = $1, updated_at = NOW() 
+         WHERE id_registro_inyeccion = $2;`,
+          [idUsuario ?? null, idRegistro]
+        );
+
+        // Insertamos los medicamentos actualizados de la tabla dinámica
+        for (const med of datos.medicamentos) {
+          const detallesFila = [
+            med.observacion ? med.observacion.trim() : null,
+            med.idViaParenteral ? `Vía: ${med.idViaParenteral}` : null,
+            med.idReceta ? `Receta: ${med.idReceta}` : null,
+            med.idRecetaManual ? `Receta Manual: ${med.idRecetaManual}` : null,
+          ].filter(Boolean).join(' | ');
+
+          const insertMed = `
+    INSERT INTO enfermeria.registro_inyeccion_medicamento (
+      id_registro_inyeccion,
+      id_medicamento,
+      observacion,
+      estado,
+      id_user_created,
+      created_at,
+      updated_at
+    ) VALUES ($1, $2, $3, true, $4, NOW(), NOW());
+  `;
+
+          await queryRunner.query(insertMed, [
+            idRegistro,
+            med.idMedicamento,
+            detallesFila || null,
+            idUsuario ?? null,
+          ]);
+        }
+      }
+
+      // 4. Actualización del Panel de Procedimientos Complementarios
+      if (datos.procedimientos) {
+        const p = datos.procedimientos;
+        const updateProc = `
+        UPDATE enfermeria.registro_inyeccion_procedimiento
+        SET curacion_plana = COALESCE($1, curacion_plana),
+            curacion_infectada = COALESCE($2, curacion_infectada),
+            oxigenoterapia = COALESCE($3, oxigenoterapia),
+            retiro_puntos = COALESCE($4, retiro_puntos),
+            prueba_sensibilidad = COALESCE($5, prueba_sensibilidad),
+            sangria = COALESCE($6, sangria),
+            signos_vitales = COALESCE($7, signos_vitales),
+            tx_vo = COALESCE($8, tx_vo),
+            orientacion_salud = COALESCE($9, orientacion_salud),
+            vendajes = COALESCE($10, vendajes),
+            nebulizacion = COALESCE($11, nebulizacion),
+            observaciones = COALESCE($12, observaciones),
+            id_user_updated = $13,
+            updated_at = NOW()
+        WHERE id_registro_inyeccion = $14;
+      `;
+        await queryRunner.query(updateProc, [
+          p.curacionPlana ?? null,
+          p.curacionInfectada ?? null,
+          p.oxigenoterapia ?? null,
+          p.retiroPuntos ?? null,
+          p.pruebaSensibilidad ?? null,
+          p.sangria ?? null,
+          p.signosVitales ?? null,
+          p.txVo ?? null,
+          p.orientacionSalud ?? null,
+          p.vendajes ?? null,
+          p.nebulizacion ?? null,
+          p.observaciones ?? null,
+          idUsuario ?? null,
+          idRegistro,
+        ]);
+      }
+
+      await queryRunner.commitTransaction();
+      return true;
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      throw new InternalServerErrorException(`Error al actualizar inyección: ${error.message}`);
+    } finally {
+      await queryRunner.release();
+    }
+  }
 }

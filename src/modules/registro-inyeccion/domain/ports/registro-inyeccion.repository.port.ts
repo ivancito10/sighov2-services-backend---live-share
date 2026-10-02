@@ -27,4 +27,5 @@ export abstract class RegistroInyeccionRepositoryPort {
     abstract listarRegistros(buscar?: string, limite?: number): Promise<any[]>;
     abstract obtenerDetalleCompleto(idRegistro: number): Promise<any | null>;
     abstract cambiarEstado(idRegistro: number, estado: boolean, idUsuario?: number): Promise<boolean>;
+    abstract actualizarTransaccion(idRegistro: number, datos: any, idUsuario?: number): Promise<boolean>;
 }

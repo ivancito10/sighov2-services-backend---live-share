@@ -19,7 +19,9 @@ export class PostgresRecetaSistemaRepository implements RecetaSistemaRepositoryP
 
   async buscarPorNumero(numeroReceta: string): Promise<RecetaSistema | null> {
     try {
-      // 1. OBTENER LA CABECERA DE LA RECETA DESDE ETAPA 2
+      const valorBuscado = numeroReceta.trim();
+
+      // 1. OBTENER LA CABECERA (Priorizando nro_receta exacto)
       const queryReceta = `
         SELECT 
           r.id AS id_receta,
@@ -28,35 +30,69 @@ export class PostgresRecetaSistemaRepository implements RecetaSistemaRepositoryP
           r.id_persona,
           r.id_especialista
         FROM consulta_externa.receta r
-        WHERE (r.nro_receta::text = $1 OR r.id::text = $1)
+        WHERE r.nro_receta::text = $1 OR r.id::text = $1
+        ORDER BY (CASE WHEN r.nro_receta::text = $1 THEN 1 ELSE 2 END) ASC
         LIMIT 1;
       `;
 
-      const rowsReceta = await this.dsEtapa2.query(queryReceta, [numeroReceta]);
+      const rowsReceta = await this.dsEtapa2.query(queryReceta, [valorBuscado]);
       if (!rowsReceta || rowsReceta.length === 0) {
         return null;
       }
       const rec = rowsReceta[0];
 
-      // 2. OBTENER DETALLE DE MEDICAMENTOS DESDE ETAPA 2
+      // 2. OBTENER DETALLE DE MEDICAMENTOS DESDE ETAPA 1
       let detallesRows: any[] = [];
       try {
         const queryDetalle = `
           SELECT 
-            rd.id AS id_detalle,
-            rd.id_medicamento,
-            COALESCE(m.codigo_medicamento, '') AS codigo_medicamento,
-            COALESCE(m.nombre, 'Medicamento') AS nombre_medicamento,
-            COALESCE(rd.cantidad, 1) AS cantidad,
-            COALESCE(rd.indicaciones, rd.recomendacion, '') AS indicaciones,
-            COALESCE(rd.forma_adm, '') AS via_sugerida
-          FROM farmacia.receta_detalle rd
-          LEFT JOIN farmacia.medicamento m ON m.id = rd.id_medicamento
-          WHERE rd.id_receta = $1;
+            rm.id AS id_detalle,
+            rm.id_medicamento,
+            COALESCE(rm.cantidad, 1) AS cantidad,
+            COALESCE(rm.indicaciones, rm.recomendacion, '') AS indicaciones,
+            COALESCE(rm.forma_adm, '') AS via_sugerida
+          FROM consulta_externa.receta_medicamento rm
+          WHERE rm.id_receta = $1;
         `;
-        detallesRows = await this.dsEtapa2.query(queryDetalle, [rec.id_receta]);
+        detallesRows = await this.dsEtapa2.query(queryDetalle, [Number(rec.id_receta)]);
+
+        // Si hay medicamentos, buscamos sus nombres en SIGHOV (Etapa 1)
+        if (detallesRows.length > 0) {
+          const idsMedicamentos = detallesRows.map((d: any) => d.id_medicamento).filter(Boolean);
+
+          if (idsMedicamentos.length > 0) {
+            try {
+              // Consulta al catálogo de medicamentos en Etapa 1
+              const qMeds = `
+                SELECT 
+                  m.id, 
+                  COALESCE(m.codigo, m.codigo_medicamento, '') AS codigo_medicamento, 
+                  COALESCE(m.nombre, m.descripcion, 'Medicamento') AS nombre_medicamento
+                FROM farmacia.medicamento m
+                WHERE m.id = ANY($1);
+              `;
+              const rowsMeds = await this.dsSighov.query(qMeds, [idsMedicamentos]);
+
+              // Unimos los nombres con los detalles tipando con any
+              const mapaNombres = new Map<number, any>(
+                (rowsMeds || []).map((m: any) => [Number(m.id), m]),
+              );
+
+              detallesRows = detallesRows.map((d: any) => {
+                const infoMed: any = mapaNombres.get(Number(d.id_medicamento));
+                return {
+                  ...d,
+                  codigo_medicamento: infoMed?.codigo_medicamento || '',
+                  nombre_medicamento: infoMed?.nombre_medicamento || 'Medicamento',
+                };
+              });
+            } catch (errMedCatalog: any) {
+              this.logger.warn(`No se pudo leer catálogo de medicamentos desde Etapa 1: ${errMedCatalog?.message}`);
+            }
+          }
+        }
       } catch (errDet: any) {
-        this.logger.warn(`Error leyendo farmacia.receta_detalle: ${errDet?.message}`);
+        this.logger.error(`Error leyendo consulta_externa.receta_medicamento: ${errDet?.message}`);
       }
 
       // 3. CONSULTAR DATOS DEL PACIENTE EN SIGHOV (Fase 1)
@@ -114,7 +150,7 @@ export class PostgresRecetaSistemaRepository implements RecetaSistemaRepositoryP
       }
 
       // 5. MAPEAR MEDICAMENTOS
-      const medicamentos = detallesRows.map(
+      const medicamentos = (detallesRows || []).map(
         (d: any) =>
           new RecetaSistemaMedicamento(
             d.id_detalle,
