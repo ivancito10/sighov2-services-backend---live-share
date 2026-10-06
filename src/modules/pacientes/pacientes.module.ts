@@ -7,9 +7,27 @@ import { GetPacienteByIdUseCase } from './application/use-cases/get-paciente-by-
 import { PacienteRepositoryPort } from './domain/ports/paciente.repository.port';
 import { PostgresPacienteRepository } from './infrastructure/persistence/postgres-paciente.repository';
 
+// Entidades TypeORM
+import { PersonaTypeOrmEntity } from './infrastructure/persistence/entities/persona.typeorm-entity';
+import { TipoAseguradoTypeOrmEntity } from './infrastructure/persistence/entities/tipo-asegurado.typeorm-entity';
+import { TitularTypeOrmEntity } from './infrastructure/persistence/entities/titular.typeorm-entity';
+import { TitularInstitucionTypeOrmEntity } from './infrastructure/persistence/entities/titular-institucion.typeorm-entity';
+import { BeneficiarioTypeOrmEntity } from './infrastructure/persistence/entities/beneficiario.typeorm-entity';
+import { InstitucionTypeOrmEntity } from './infrastructure/persistence/entities/institucion.typeorm-entity';
+
 @Module({
   imports: [
-    TypeOrmModule.forFeature([], DB_CONNECTIONS.SIGHOV), // Conexión a la Fase 1
+    TypeOrmModule.forFeature(
+      [
+        PersonaTypeOrmEntity,
+        TipoAseguradoTypeOrmEntity,
+        TitularTypeOrmEntity,
+        TitularInstitucionTypeOrmEntity,
+        BeneficiarioTypeOrmEntity,
+        InstitucionTypeOrmEntity,
+      ],
+      DB_CONNECTIONS.SIGHOV, // Conexión a la Fase 1
+    ),
   ],
   controllers: [PacientesController],
   providers: [
@@ -22,4 +40,4 @@ import { PostgresPacienteRepository } from './infrastructure/persistence/postgre
   ],
   exports: [PacienteRepositoryPort],
 })
-export class PacientesModule { }
+export class PacientesModule {}
