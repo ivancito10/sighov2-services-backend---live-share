@@ -1,14 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
+import { InjectDataSource } from '@nestjs/typeorm'; // <-- 1. Importante
 import { DataSource } from 'typeorm';
-import { DB_CONNECTIONS } from '../../../../config/database.constants';
 import { UserAuthRepositoryPort } from '../../domain/ports/user-auth.repository.port';
 import { UserAuth } from '../../domain/entities/user-auth.entity';
 
 @Injectable()
 export class PostgresUserAuthRepository implements UserAuthRepositoryPort {
   constructor(
-    @InjectDataSource(DB_CONNECTIONS.SIGHOV)
+    @InjectDataSource('sighov') // <-- 2. Esto le dice a NestJS que use la conexión de la Fase 1
     private readonly dataSource: DataSource,
   ) {}
 
@@ -17,7 +16,8 @@ export class PostgresUserAuthRepository implements UserAuthRepositoryPort {
       SELECT 
         u.id, 
         u.name AS username, 
-        u.email, 
+        u.email,
+        -- Reemplazamos $2y$ por $2b$ para que bcrypt de Node.js pueda leerlo bien
         REPLACE(u.password, '$2y$', '$2b$') AS password, 
         u.estado, 
         u.id_persona,

@@ -21,13 +21,13 @@ import { AuthModule } from './modules/auth/auth.module';
 
 //import { PacientesModule } from './modules/pacientes/pacientes.module';
 // Si tienen módulos activos (ej. pacientes), impórtalos aquí también:
-import { ViaParenteralModule } from './modules/via-parenteral/via-parenteral.module';
-import { RecetaManualModule } from './modules/receta-manual/receta-manual.module';
 import { PacientesModule } from './modules/pacientes/pacientes.module';
 import { EspecialistasModule } from './modules/especialistas/especialistas.module';
+import { FisioterapeutasModule } from './modules/fisioterapeutas/fisioterapeutas.module';
+import { HorariosFisioterapiaModule } from './modules/horarios-fisioterapia/horarios-fisioterapia.module';
 import { MedicamentosModule } from './modules/medicamentos/medicamentos.module';
 import { RecetasSistemaEnfermeriaModule } from './modules/recetas-sistema-enfermeria/recetas-sistema-enfermeria.module';
-import { RegistroInyeccionModule } from './modules/registro-inyeccion/registro-inyeccion.module';
+import { OrdenesFisioterapiaModule } from './modules/ordenes-fisioterapia/ordenes-fisioterapia.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -61,14 +61,13 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
         // Registra tus módulos funcionales aquí
         AuthModule,
-        //PacientesModule,
-        ViaParenteralModule,
-        RecetaManualModule,
         PacientesModule,
         EspecialistasModule,
+        FisioterapeutasModule,
+        HorariosFisioterapiaModule,
         MedicamentosModule,
         RecetasSistemaEnfermeriaModule,
-        RegistroInyeccionModule,
+        OrdenesFisioterapiaModule
     ],
     controllers: [
         AppController

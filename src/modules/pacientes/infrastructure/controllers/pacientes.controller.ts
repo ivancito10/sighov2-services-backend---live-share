@@ -1,9 +1,9 @@
 import { Controller, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../../../auth/infrastructure/guards/jwt-auth.guard';
+// import { JwtAuthGuard } from '../../../auth/infrastructure/guards/jwt-auth.guard';
 import { PacienteRepositoryPort } from '../../domain/ports/paciente.repository.port';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+// @UseGuards(JwtAuthGuard)
 export class PacientesController {
   constructor(private readonly pacienteRepo: PacienteRepositoryPort) { }
 

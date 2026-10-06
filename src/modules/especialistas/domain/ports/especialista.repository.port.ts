@@ -1,8 +1,15 @@
 import { Especialista } from '../entities/especialista.entity';
 
 export abstract class EspecialistaRepositoryPort {
-    abstract listarActivos(termino?: string): Promise<Especialista[]>;
+    abstract listarActivos(
+        consulta: ConsultaEspecialistas,
+    ): Promise<{ datos: Especialista[]; total: number }>;
     abstract buscarPorId(idEspecialista: number): Promise<Especialista | null>;
-    abstract listarHabilitados(): Promise<any[]>;
-    abstract obtenerDatosEspecialista(idEspecialista: number): Promise<any | null>;
+}
+export interface ConsultaEspecialistas {
+    buscar: string;
+    especialidad?: string;
+    idEspecialidad?: number;
+    pagina: number;
+    limite: number;
 }

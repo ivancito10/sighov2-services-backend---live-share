@@ -8,5 +8,6 @@ export class Paciente {
     public readonly sexo: string,
     public readonly tipoAsegurado: string, // <-- "TITULAR", "BENEFICIARIO", "NO ASEGURADO"
     public readonly estado: boolean,
+    public readonly institucion: string,
   ) { }
 }

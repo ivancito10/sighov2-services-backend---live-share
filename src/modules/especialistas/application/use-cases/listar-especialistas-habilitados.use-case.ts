@@ -3,9 +3,9 @@ import { EspecialistaRepositoryPort } from '../../domain/ports/especialista.repo
 
 @Injectable()
 export class ListarEspecialistasHabilitadosUseCase {
-  constructor(private readonly repo: EspecialistaRepositoryPort) {}
+  constructor(private readonly repo: EspecialistaRepositoryPort) { }
 
-  async execute(): Promise<any[]> {
-    return await this.repo.listarHabilitados();
-  }
+  //async execute(): Promise<any[]> {
+  //return await this.repo.listarHabilitados();
+  //}
 }
