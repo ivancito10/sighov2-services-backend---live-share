@@ -23,16 +23,15 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
         COALESCE(p.sexo, '') AS sexo,
         COALESCE(ta.tipo_asegurado, 'NO ASEGURADO') AS tipo_asegurado,
         COALESCE(p.afiliado, true) AS estado,
+        
+        -- Institución principal (prioridad)
         CASE 
-          -- 1. ESTUDIANTE (id 11 o texto)
           WHEN p.id_tipo_asegurado = 11 OR UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%ESTUDIANTE%' 
             THEN 'APORTE UMSA ESTUDIANTE'
 
-          -- 2. CASOS DEL INTERIOR (id 9, 10 o texto)
           WHEN p.id_tipo_asegurado IN (9, 10) OR UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%INTERIOR%' 
             THEN 'SEGURO SOCIAL UNIVERSITARIO DEL INTERIOR'
 
-          -- 3. BENEFICIARIOS (Busca la institución patronal de su titular)
           WHEN UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%BENEFICIARIO%' 
             THEN COALESCE(
               (
@@ -44,23 +43,12 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
                 WHERE b.id_persona = p.id
                 ORDER BY 
                   (CASE WHEN UPPER(COALESCE(ti.tipo_institucion, '')) = 'PATRONAL' THEN 1 ELSE 2 END) ASC,
-                  (CASE WHEN ti.fecha_baja IS NULL THEN 1 ELSE 2 END) ASC,
                   ti.updated_at DESC NULLS LAST
-                LIMIT 1
-              ),
-              (
-                SELECT inst.nombre 
-                FROM afiliacion.beneficiario b
-                JOIN afiliacion.beneficiario_institucion bi ON bi.id_beneficiario = b.id AND bi.estado = true
-                JOIN aportes.institucion inst ON inst.id = bi.id_institucion
-                WHERE b.id_persona = p.id
-                ORDER BY bi.id ASC
                 LIMIT 1
               ),
               'PARTICULAR / SIN INSTITUCIÓN'
             )
 
-          -- 4. TITULARES (Prioriza PATRONAL, sin baja y más reciente)
           WHEN UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%TITULAR%' 
             THEN COALESCE(
               (
@@ -71,15 +59,78 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
                 WHERE t.id_persona = p.id
                 ORDER BY 
                   (CASE WHEN UPPER(COALESCE(ti.tipo_institucion, '')) = 'PATRONAL' THEN 1 ELSE 2 END) ASC,
-                  (CASE WHEN ti.fecha_baja IS NULL THEN 1 ELSE 2 END) ASC,
                   ti.updated_at DESC NULLS LAST
+                LIMIT 1
+              ),
+              (
+                SELECT inst.nombre 
+                FROM afiliacion.titular t
+                JOIN afiliacion.titular_institucion ti ON ti.id_titular = t.id
+                JOIN aportes.institucion inst ON inst.id = ti.id_institucion
+                WHERE t.id_persona = p.id
+                ORDER BY ti.updated_at DESC NULLS LAST
                 LIMIT 1
               ),
               'PARTICULAR / SIN INSTITUCIÓN'
             )
 
           ELSE 'PARTICULAR / SIN INSTITUCIÓN'
-        END AS institucion
+        END AS institucion,
+
+        -- Lista con todas las instituciones (activas e inactivas)
+        CASE 
+          WHEN p.id_tipo_asegurado = 11 OR UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%ESTUDIANTE%' 
+            THEN json_build_array(json_build_object(
+              'idInstitucion', 0,
+              'nombre', 'APORTE UMSA ESTUDIANTE',
+              'tipoInstitucion', 'ESTUDIANTIL',
+              'activo', true
+            ))
+
+          WHEN p.id_tipo_asegurado IN (9, 10) OR UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%INTERIOR%' 
+            THEN json_build_array(json_build_object(
+              'idInstitucion', 0,
+              'nombre', 'SEGURO SOCIAL UNIVERSITARIO DEL INTERIOR',
+              'tipoInstitucion', 'CONVENIO INTERIOR',
+              'activo', true
+            ))
+
+          WHEN UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%TITULAR%' 
+            THEN (
+              SELECT COALESCE(json_agg(
+                json_build_object(
+                  'idInstitucion', inst.id,
+                  'nombre', inst.nombre,
+                  'tipoInstitucion', COALESCE(ti.tipo_institucion, 'SIN DATO'),
+                  'activo', COALESCE(ti.estado, false)
+                ) ORDER BY ti.estado DESC, ti.updated_at DESC NULLS LAST
+              ), '[]'::json)
+              FROM afiliacion.titular t
+              JOIN afiliacion.titular_institucion ti ON ti.id_titular = t.id
+              JOIN aportes.institucion inst ON inst.id = ti.id_institucion
+              WHERE t.id_persona = p.id
+            )
+
+          WHEN UPPER(COALESCE(ta.tipo_asegurado, '')) LIKE '%BENEFICIARIO%' 
+            THEN (
+              SELECT COALESCE(json_agg(
+                json_build_object(
+                  'idInstitucion', inst.id,
+                  'nombre', inst.nombre,
+                  'tipoInstitucion', COALESCE(ti.tipo_institucion, 'SIN DATO'),
+                  'activo', COALESCE(ti.estado, false)
+                ) ORDER BY ti.estado DESC, ti.updated_at DESC NULLS LAST
+              ), '[]'::json)
+              FROM afiliacion.beneficiario b
+              JOIN afiliacion.titular t ON t.id = b.id_titular
+              JOIN afiliacion.titular_institucion ti ON ti.id_titular = t.id
+              JOIN aportes.institucion inst ON inst.id = ti.id_institucion
+              WHERE b.id_persona = p.id
+            )
+
+          ELSE '[]'::json
+        END AS lista_instituciones
+
       FROM administracion.persona p
       LEFT JOIN administracion.tipo_asegurado ta ON ta.id = p.id_tipo_asegurado
       WHERE p.id = $1
@@ -90,6 +141,10 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
     if (!rows || rows.length === 0) return null;
 
     const r = rows[0];
+    const instituciones = typeof r.lista_instituciones === 'string'
+      ? JSON.parse(r.lista_instituciones)
+      : (r.lista_instituciones || []);
+
     return new Paciente(
       r.id_persona,
       r.ci,
@@ -100,6 +155,7 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
       r.tipo_asegurado,
       r.estado,
       r.institucion,
+      instituciones,
     );
   }
 
@@ -210,6 +266,7 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
           r.tipo_asegurado,
           r.estado,
           r.institucion,
+          [], // Lista vacía para resultados rápidos de búsqueda
         ),
     );
   }
