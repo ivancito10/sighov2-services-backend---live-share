@@ -25,7 +25,8 @@ export class TitularInstitucionTypeOrmEntity {
   @Column({ name: 'updated_at', type: 'timestamp', nullable: true })
   updatedAt: Date;
 
-  @ManyToOne(() => TitularTypeOrmEntity, (t) => t.titularInstituciones)
+  // Tipado explícito de 't' para evitar el error de parámetro any
+  @ManyToOne(() => TitularTypeOrmEntity, (t: TitularTypeOrmEntity) => t.titularInstituciones)
   @JoinColumn({ name: 'id_titular' })
   titular: TitularTypeOrmEntity;
 
