@@ -21,13 +21,12 @@ import { AuthModule } from './modules/auth/auth.module';
 
 //import { PacientesModule } from './modules/pacientes/pacientes.module';
 // Si tienen módulos activos (ej. pacientes), impórtalos aquí también:
-import { PacientesModule } from './modules/pacientes/pacientes.module';
 import { EspecialistasModule } from './modules/especialistas/especialistas.module';
 import { FisioterapeutasModule } from './modules/fisioterapeutas/fisioterapeutas.module';
-import { HorariosFisioterapiaModule } from './modules/horarios-fisioterapia/horarios-fisioterapia.module';
 import { MedicamentosModule } from './modules/medicamentos/medicamentos.module';
-import { RecetasSistemaEnfermeriaModule } from './modules/recetas-sistema-enfermeria/recetas-sistema-enfermeria.module';
-import { OrdenesFisioterapiaModule } from './modules/ordenes-fisioterapia/ordenes-fisioterapia.module';
+import { PacientesModule } from './modules/pacientes/pacientes.module';
+import { PersonasModule } from './modules/personas/personas.module';
+import { SedesModule } from './modules/sedes/sedes.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -64,10 +63,8 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
         PacientesModule,
         EspecialistasModule,
         FisioterapeutasModule,
-        HorariosFisioterapiaModule,
         MedicamentosModule,
-        RecetasSistemaEnfermeriaModule,
-        OrdenesFisioterapiaModule
+        PersonasModule
     ],
     controllers: [
         AppController
