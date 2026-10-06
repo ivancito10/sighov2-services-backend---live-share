@@ -1,33 +1,40 @@
-import { Controller, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
-// import { JwtAuthGuard } from '../../../auth/infrastructure/guards/jwt-auth.guard';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { SearchPacientesUseCase } from '../../application/use-cases/search-pacientes.use-case';
+import { GetPacienteByIdUseCase } from '../../application/use-cases/get-paciente-by-id.use-case';
 import { PacienteRepositoryPort } from '../../domain/ports/paciente.repository.port';
+import { PaginationPacienteDto } from '../../application/dtos/search-paciente.dto';
 
 @Controller()
-// @UseGuards(JwtAuthGuard)
 export class PacientesController {
-  constructor(private readonly pacienteRepo: PacienteRepositoryPort) { }
+  constructor(
+    private readonly searchPacientesUseCase: SearchPacientesUseCase,
+    private readonly getPacienteByIdUseCase: GetPacienteByIdUseCase,
+    private readonly pacienteRepo: PacienteRepositoryPort,
+  ) {}
 
-  // 1. ENDPOINT HOMOLOGADO CON LARAVEL
+  // Búsqueda paginada
+  @Get('pacientes')
+  async listarPacientesInterno(@Query() queryDto: PaginationPacienteDto) {
+    return await this.searchPacientesUseCase.ejecutar(queryDto);
+  }
+
+  // Detalle por ID (mantiene resolución completa de instituciones)
+  @Get('pacientes/:id')
+  async obtenerPorId(@Param('id', ParseIntPipe) id: number) {
+    return await this.getPacienteByIdUseCase.ejecutar(id);
+  }
+
+  // Compatibilidad Laravel
   @Get('s1/administracion/pacientes')
   async listarPacientesLaravel(@Query('limite') limite?: number) {
-    const data = await this.pacienteRepo.listarPacientesAdministracion(limite ? Number(limite) : 50);
+    const data = await this.pacienteRepo.listarPacientesAdministracion(
+      limite ? Number(limite) : 50,
+    );
     return {
       status: 200,
       success: true,
-      message: 'Peticion pacientes Existosa',
+      message: 'Peticion pacientes Exitosa',
       data,
     };
-  }
-
-  // 2. ENDPOINT QUE YA TENÍAS PARA ENFERMERÍA (Se mantiene intacto)
-  @Get('pacientes')
-  async listarPacientesInterno(@Query('q') query?: string) {
-    return await this.pacienteRepo.buscarPacientes(query);
-  }
-
-  // 3. OBTENER PACIENTE POR ID
-  @Get('pacientes/:id')
-  async obtenerPorId(@Param('id', ParseIntPipe) id: number) {
-    return await this.pacienteRepo.buscarPorId(id);
   }
 }

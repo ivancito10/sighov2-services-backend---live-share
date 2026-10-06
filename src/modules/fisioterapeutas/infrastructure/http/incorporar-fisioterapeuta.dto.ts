@@ -8,7 +8,11 @@ import {
 } from 'class-validator';
 import { CrearFisioterapeutaDto } from './crear-fisioterapeuta.dto';
 export class IncorporarFisioterapeutaDto extends CrearFisioterapeutaDto {
-    @IsInt() @Min(1) @Max(2147483647) idPersona: number;
+    @ValidateIf((_o, v) => v !== undefined)
+    @IsInt()
+    @Min(1)
+    @Max(2147483647)
+    idPersona?: number;
     @ValidateIf((_o, v) => v !== undefined)
     @IsInt()
     @Min(1)

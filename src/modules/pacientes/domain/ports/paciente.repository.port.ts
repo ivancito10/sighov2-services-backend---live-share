@@ -1,10 +1,20 @@
 import { Paciente } from '../entities/paciente.entity';
+import { PaginatedResult } from './paginated-result.interface';
+
+export interface FiltrosBusquedaPaciente {
+  q?: string;
+  ci?: string;
+  matricula?: string;
+  nombre?: string;
+  page?: number;
+  limit?: number;
+}
 
 export abstract class PacienteRepositoryPort {
-  // Los métodos que ya tienes:
-  abstract buscarPacientes(termino?: string, limite?: number): Promise<any[]>;
-  abstract buscarPorId(idPersona: number): Promise<any | null>;
+  abstract buscarPacientes(
+    filtros: FiltrosBusquedaPaciente,
+  ): Promise<PaginatedResult<Paciente>>;
 
-  // Nuevo método homologado con Laravel:
+  abstract buscarPorId(idPersona: number): Promise<Paciente | null>;
   abstract listarPacientesAdministracion(limite?: number): Promise<any[]>;
 }

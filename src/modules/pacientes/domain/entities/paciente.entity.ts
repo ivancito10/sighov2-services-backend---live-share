@@ -16,6 +16,6 @@ export class Paciente {
     public readonly tipoAsegurado: string,
     public readonly estado: boolean,
     public readonly institucion: string,
-    public readonly instituciones: PacienteInstitucionDetalle[] = [], // <-- Lista completa
-  ) { }
+    public readonly instituciones: PacienteInstitucionDetalle[] = [],
+  ) {}
 }

@@ -1,56 +1,55 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Brackets, DataSource, ILike } from 'typeorm';
 import { DB_CONNECTIONS } from '../../../../config/database.constants';
 import { EspecialistaRepositoryPort } from '../../domain/ports/especialista.repository.port';
 import type { ConsultaEspecialistas } from '../../domain/ports/especialista.repository.port';
-import type { Especialista } from '../../domain/entities/especialista.entity';
-import { listado, datosModal } from './especialista-select';
-
-const base = `FROM plataforma.especialista e
-    JOIN administracion.persona p ON p.id=e.id_persona
-    LEFT JOIN administracion.departamento d ON d.id=p.id_dept_exp
-    LEFT JOIN administracion.especialidad esp ON esp.id=e.id_especialidad`;
-const patron = (s: string) => '%' + s.replace(/[\\%_]/g, '\\$&') + '%';
-
+import {
+    especialistasQuery,
+    buscarPersona,
+    mapEspecialista,
+    patron,
+} from '../../../../common/persistence/orm/lecturas';
 @Injectable()
 export class PostgresEspecialistaRepository implements EspecialistaRepositoryPort {
     constructor(
         @InjectDataSource(DB_CONNECTIONS.SIGHOV)
-        private readonly dataSource: DataSource,
+        private readonly db: DataSource,
     ) {}
-
     async listarActivos(c: ConsultaEspecialistas) {
-        const from = `${base} WHERE e.estado=true
-            AND (p.ci ILIKE $1 OR COALESCE(p.matricula_seguro,'') ILIKE $1
-                OR CONCAT_WS(' ',p.nombres,p.p_apellido,p.s_apellido) ILIKE $1
-                OR COALESCE(esp.especialidad,'') ILIKE $1)
-            AND ($2::integer IS NULL OR e.id_especialidad=$2)
-            AND ($3::text IS NULL OR esp.especialidad ILIKE $3 OR esp.sigla ILIKE $3)`;
-        const args = [
-            patron(c.buscar),
-            c.idEspecialidad ?? null,
-            c.especialidad ? patron(c.especialidad) : null,
-        ];
-        const [datos, conteo] = await Promise.all([
-            this.dataSource.query<Especialista[]>(
-                `SELECT ${listado},${datosModal} ${from}
-                ORDER BY p.p_apellido NULLS LAST,p.s_apellido NULLS LAST,p.nombres,e.id LIMIT $4 OFFSET $5`,
-                [...args, c.limite, (c.pagina - 1) * c.limite],
-            ),
-            this.dataSource.query<{ total: string }[]>(
-                `SELECT COUNT(*)::text AS total ${from}`,
-                args,
-            ),
-        ]);
-        return { datos, total: Number(conteo[0].total) };
+        const q = especialistasQuery(this.db).where({ estado: true });
+        if (c.buscar.trim())
+            q.andWhere(
+                new Brackets((b) => {
+                    b.where({
+                        especialidad: { nombre: ILike(patron(c.buscar)) },
+                    });
+                    b.orWhere(
+                        new Brackets((p) => {
+                            buscarPersona(p, c.buscar, true);
+                        }),
+                    );
+                }),
+            );
+        if (c.idEspecialidad !== undefined)
+            q.andWhere({ idEspecialidad: c.idEspecialidad });
+        if (c.especialidad)
+            q.andWhere([
+                { especialidad: { nombre: ILike(patron(c.especialidad)) } },
+                { especialidad: { sigla: ILike(patron(c.especialidad)) } },
+            ]);
+        const [rows, total] = await q
+            .orderBy('p.primerApellido', 'ASC', 'NULLS LAST')
+            .addOrderBy('p.segundoApellido', 'ASC', 'NULLS LAST')
+            .addOrderBy('p.nombres', 'ASC')
+            .addOrderBy('e.id', 'ASC')
+            .skip((c.pagina - 1) * c.limite)
+            .take(c.limite)
+            .getManyAndCount();
+        return { datos: rows.map(mapEspecialista), total };
     }
-
-    async buscarPorId(id: number): Promise<Especialista | null> {
-        const rows = await this.dataSource.query<Especialista[]>(
-            `SELECT ${listado},${datosModal} ${base} WHERE e.id=$1`,
-            [id],
-        );
-        return rows[0] ?? null;
+    async buscarPorId(id: number) {
+        const row = await especialistasQuery(this.db).where({ id }).getOne();
+        return row ? mapEspecialista(row) : null;
     }
 }

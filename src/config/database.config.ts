@@ -1,57 +1,47 @@
-import { ConfigService } from "@nestjs/config";
-import { TypeOrmModuleOptions } from "@nestjs/typeorm";
+import {
+    entidadesEtapa1,
+    entidadesEtapa2,
+} from '../common/persistence/orm/entities';
+import { ConfigService } from '@nestjs/config';
+import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 export const sighovDatabaseConfig = (
     configService: ConfigService,
-): TypeOrmModuleOptions => ( {
+): TypeOrmModuleOptions => ({
     type: 'postgres',
     host: configService.getOrThrow<string>('DB_SIGHOV_HOST'),
-    port: Number(
-        configService.getOrThrow<string>('DB_SIGHOV_PORT'),
-    ),
+    port: Number(configService.getOrThrow<string>('DB_SIGHOV_PORT')),
 
-    username: configService.getOrThrow<string>(
-        'DB_SIGHOV_USERNAME',
-    ),
+    username: configService.getOrThrow<string>('DB_SIGHOV_USERNAME'),
 
-    password: configService.getOrThrow<string>(
-        'DB_SIGHOV_PASSWORD',
-    ),
+    password: configService.getOrThrow<string>('DB_SIGHOV_PASSWORD'),
 
-    database: configService.getOrThrow<string>(
-        'DB_SIGHOV_DATABASE',
-    ),
+    database: configService.getOrThrow<string>('DB_SIGHOV_DATABASE'),
+    entities: entidadesEtapa1,
     autoLoadEntities: true,
     synchronize: false,
     logging: false,
-} );
+});
 
 export const etapa2DatabaseConfig = (
-  configService: ConfigService,
+    configService: ConfigService,
 ): TypeOrmModuleOptions => ({
-  type: 'postgres',
+    type: 'postgres',
 
-  host: configService.getOrThrow<string>('DB_ETAPA2_HOST'),
+    host: configService.getOrThrow<string>('DB_ETAPA2_HOST'),
 
-  port: Number(
-    configService.getOrThrow<string>('DB_ETAPA2_PORT'),
-  ),
+    port: Number(configService.getOrThrow<string>('DB_ETAPA2_PORT')),
 
-  username: configService.getOrThrow<string>(
-    'DB_ETAPA2_USERNAME',
-  ),
+    username: configService.getOrThrow<string>('DB_ETAPA2_USERNAME'),
 
-  password: configService.getOrThrow<string>(
-    'DB_ETAPA2_PASSWORD',
-  ),
+    password: configService.getOrThrow<string>('DB_ETAPA2_PASSWORD'),
 
-  database: configService.getOrThrow<string>(
-    'DB_ETAPA2_DATABASE',
-  ),
+    database: configService.getOrThrow<string>('DB_ETAPA2_DATABASE'),
 
-  autoLoadEntities: true,
+    entities: entidadesEtapa2,
+    autoLoadEntities: true,
 
-  synchronize: false,
+    synchronize: false,
 
-  logging: false,
+    logging: false,
 });

@@ -11,6 +11,12 @@ export class PersonaTypeOrmEntity {
   @Column({ type: 'varchar', nullable: true })
   ci: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  complemento: string;
+
+  @Column({ name: 'clave_unica', type: 'varchar', nullable: true })
+  claveUnica: string;
+
   @Column({ name: 'matricula_seguro', type: 'varchar', nullable: true })
   matriculaSeguro: string;
 
@@ -39,9 +45,11 @@ export class PersonaTypeOrmEntity {
   @JoinColumn({ name: 'id_tipo_asegurado' })
   tipoAsegurado: TipoAseguradoTypeOrmEntity;
 
-  @OneToMany(() => TitularTypeOrmEntity, (t) => t.persona)
+// Tipado explícito de 't' para evitar el error de 'unknown'
+  @OneToMany(() => TitularTypeOrmEntity, (t: TitularTypeOrmEntity) => t.persona)
   titulares: TitularTypeOrmEntity[];
 
-  @OneToMany(() => BeneficiarioTypeOrmEntity, (b) => b.persona)
+  // Tipado explícito de 'b' para evitar el error de 'unknown'
+  @OneToMany(() => BeneficiarioTypeOrmEntity, (b: BeneficiarioTypeOrmEntity) => b.persona)
   beneficiarios: BeneficiarioTypeOrmEntity[];
 }

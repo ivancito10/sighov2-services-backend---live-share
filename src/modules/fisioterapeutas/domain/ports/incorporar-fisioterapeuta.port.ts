@@ -1,10 +1,11 @@
 import type { RegistroFisioterapeuta } from '../models/fisioterapeuta.model';
 export interface SeleccionIncorporacion {
-    idPersona: number;
+    idPersona?: number;
     idEspecialista?: number;
     idUsuario?: string;
 }
 export interface IncorporacionResultado {
+    personaCreada: boolean;
     idPersona: number;
     idEspecialista: number;
     idUsuario: string;

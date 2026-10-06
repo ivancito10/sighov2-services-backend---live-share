@@ -5,13 +5,16 @@ import type {
     SchemaObject,
     ParameterObject,
 } from '@nestjs/swagger';
+import basicAuth from 'express-basic-auth';
+import {
+    configurarSwaggerAuth,
+} from './swagger-auth';
 import { AuthModule } from '../modules/auth/auth.module';
-import { EspecialistasModule } from '../modules/especialistas/especialistas.module';
-import { FisioterapeutasModule } from '../modules/fisioterapeutas/fisioterapeutas.module';
-import { MedicamentosModule } from '../modules/medicamentos/medicamentos.module';
 import { PacientesModule } from '../modules/pacientes/pacientes.module';
-import { SedesModule } from '../modules/sedes/sedes.module';
 import { PersonasModule } from '../modules/personas/personas.module';
+import { EspecialistasModule } from '../modules/especialistas/especialistas.module';
+import { SedesModule } from '../modules/sedes/sedes.module';
+import { FisioterapeutasModule } from '../modules/fisioterapeutas/fisioterapeutas.module';
 
 const texto: SchemaObject = { type: 'string' };
 const entero: SchemaObject = {
@@ -105,6 +108,30 @@ const sede = objeto({
     id_residencia: nullable(entero),
     residencia: nullable(texto),
 });
+const paciente = objeto({
+    idPersona: entero,
+    ci: texto,
+    matricula: texto,
+    nombreCompleto: texto,
+    fechaNacimiento: nullable({ type: 'string', format: 'date' }),
+    sexo: texto,
+    tipoAsegurado: texto,
+    estado: { type: 'boolean' },
+    institucion: texto,
+});
+const pacienteAdministracion = objeto({
+    nombres: texto,
+    p_apellido: texto,
+    s_apellido: texto,
+    matricula_seguro: texto,
+    sexo: texto,
+    fecha_nacimiento: texto,
+    ci: texto,
+    complemento: nullable(texto),
+    nacionalidad: texto,
+    telefono: { type: 'number' },
+    residencia: texto,
+});
 const query = (
     name: string,
     schema: SchemaObject,
@@ -150,6 +177,28 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
             list?: boolean;
         }
     > = {
+        '/api/pacientes': {
+            tag: 'Pacientes',
+            summary:
+                'Buscar pacientes por CI, matrícula o nombre (hasta 40 resultados)',
+            schema: { type: 'array', items: paciente },
+        },
+        '/api/pacientes/{id}': {
+            tag: 'Pacientes',
+            summary: 'Consultar paciente por ID de persona',
+            schema: nullable(paciente),
+            detail: true,
+        },
+        '/api/s1/administracion/pacientes': {
+            tag: 'Pacientes',
+            summary: 'Listado de pacientes para administración / Laravel',
+            schema: objeto({
+                status: { type: 'integer', example: 200 },
+                success: { type: 'boolean' },
+                message: texto,
+                data: { type: 'array', items: pacienteAdministracion },
+            }),
+        },
         '/api/personas': {
             tag: 'Personas',
             summary: 'Listar todas las personas (paginado)',
@@ -203,11 +252,12 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
         },
         '/api/fisioterapeutas/incorporaciones': {
             tag: 'Fisioterapia · Incorporaciones',
-            summary: 'Incorporar una persona existente a fisioterapia',
+            summary: 'Crear o incorporar una persona a fisioterapia',
             schema: objeto({
                 idPersona: entero,
                 idEspecialista: entero,
                 idUsuario: texto,
+                personaCreada: { type: 'boolean' },
                 especialistaCreado: { type: 'boolean' },
                 usuarioCreado: { type: 'boolean' },
                 email: nullable(texto),
@@ -291,6 +341,27 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                     ),
                 );
         }
+        if (path === '/api/pacientes')
+            op.parameters.push(
+                query(
+                    'q',
+                    texto,
+                    'Búsqueda parcial por CI, matrícula o nombre',
+                ),
+            );
+        if (path === '/api/s1/administracion/pacientes')
+            op.parameters.push(
+                query(
+                    'limite',
+                    { type: 'integer', default: 50 },
+                    'Cantidad de resultados',
+                ),
+            );
+        if (path === '/api/pacientes/{id}') {
+            delete op.responses['404'];
+            op.description =
+                'El controlador actual devuelve null si no encuentra la persona.';
+        }
         if (path === '/api/auth/login')
             op.requestBody = {
                 required: true,
@@ -311,7 +382,7 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
             };
         if (path.endsWith('/incorporaciones')) {
             op.description =
-                'Envía el formulario completo e idPersona. Reutiliza los registros existentes. Si hay varios especialistas o usuarios, indica sus IDs. Contrato EVENTUAL exige fechas. Conserva credenciales existentes. Ejecuta escrituras reales al pulsar Execute.';
+                'Envía el formulario completo. idPersona es opcional: al omitirlo busca por CI y complemento, reutiliza la persona si existe o crea persona, especialista y usuario. Un idPersona explícito inexistente devuelve 404. Si hay varios especialistas o usuarios, indica sus IDs. Contrato EVENTUAL exige fechas. Conserva credenciales existentes. Ejecuta escrituras reales al pulsar Execute.';
             op.responses['404'] = error('Persona no encontrada');
             op.responses['409'] = error(
                 'Documento duplicado o selección ambigua',
@@ -377,7 +448,6 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                     }),
                     additionalProperties: false,
                     required: [
-                        'idPersona',
                         'ci',
                         'nombres',
                         'sexo',
@@ -409,33 +479,340 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
 }
 
 export function configurarSwagger(app: INestApplication) {
-    const config = new DocumentBuilder()
-        .setTitle('SIGHO · APIs de consulta e incorporaciones')
-        .setVersion('1.0')
-        .setDescription(
-            'Inicia sesión en Auth, copia accessToken y pégalo en Authorize. Los IDs de ejemplo deben reemplazarse por registros reales.',
-        )
-        .addBearerAuth()
-        .build();
-    const document = limitarDocumento(
-        SwaggerModule.createDocument(app, config, {
-            include: [
-                AuthModule,
-                PersonasModule,
-                EspecialistasModule,
-                SedesModule,
-                FisioterapeutasModule,
-            ],
-            deepScanRoutes: false,
-        }),
-    );
-    SwaggerModule.setup('api/docs', app, document, {
-        jsonDocumentUrl: 'api/docs-json',
-        swaggerOptions: {
-            persistAuthorization: false,
-            defaultModelsExpandDepth: -1,
+    const swaggerUser = process.env.SWAGGER_USER;
+    const swaggerPassword = process.env.SWAGGER_PASSWORD;
+
+    if (!swaggerUser || !swaggerPassword) {
+        throw new Error(
+            'SWAGGER_USER y SWAGGER_PASSWORD deben estar configurados',
+        );
+    }
+
+    const swaggerAuth = basicAuth({
+        challenge: true,
+
+        users: {
+            [swaggerUser]: swaggerPassword,
         },
-        customSiteTitle: 'SIGHO · Swagger',
+
+        unauthorizedResponse: {
+            statusCode: 401,
+            message: 'Acceso no autorizado a la documentación API',
+        },
     });
+
+    configurarSwaggerAuth(app);
+
+    // // Protege la interfaz Swagger
+    // app.use('/api/docs', swaggerAuth);
+
+    // MUY IMPORTANTE:
+    // también protege el JSON de OpenAPI
+    app.use('/api/docs-json', swaggerAuth);
+
+    
+
+    const config =
+        new DocumentBuilder()
+            .setTitle(
+                'SIGHO · APIs de consulta',
+            )
+            .setVersion('1.0')
+            .setDescription(
+                'Inicia sesión en Auth, copia accessToken y pégalo en Authorize. Los IDs de ejemplo deben reemplazarse por registros reales.',
+            )
+            .addBearerAuth()
+            .build();
+
+
+    const document =
+        limitarDocumento(
+            SwaggerModule.createDocument(
+                app,
+                config,
+                {
+                    include: [
+                        AuthModule,
+                        PacientesModule,
+                        PersonasModule,
+                        EspecialistasModule,
+                        SedesModule,
+                        FisioterapeutasModule,
+                    ],
+
+                    deepScanRoutes: false,
+                },
+            ),
+        );
+
+
+    SwaggerModule.setup(
+        'api/docs',
+        app,
+        document,
+        {
+            jsonDocumentUrl:
+                'api/docs-json',
+
+            swaggerOptions: {
+                persistAuthorization: false,
+                defaultModelsExpandDepth: -1,
+            },
+
+            customSiteTitle:
+                'SIGHO · Swagger',
+
+            customCss: `
+                .swagger-ui .topbar {
+                    background-color: #1b1b1b;
+                }
+
+                .swagger-ui .topbar-wrapper {
+                    max-width: 1460px;
+                }
+
+                #swagger-logout-container {
+                    margin-left: auto;
+                    display: flex;
+                    align-items: center;
+                }
+
+                #swagger-logout-button {
+                    background: #49cc90;
+                    color: white;
+
+                    border: none;
+                    border-radius: 4px;
+
+                    padding: 9px 18px;
+
+                    font-size: 13px;
+                    font-weight: 700;
+
+                    cursor: pointer;
+
+                    transition:
+                        background .2s;
+                }
+
+                #swagger-logout-button:hover {
+                    background: #3bb77e;
+                }
+            `,
+
+            customJsStr: `
+                (function () {
+
+                    // ======================================
+                    // COMPROBAR SESIÓN
+                    // ======================================
+
+                    async function comprobarSesion() {
+
+                        try {
+
+                            const response =
+                                await fetch(
+                                    '/api/docs/session',
+                                    {
+                                        method: 'GET',
+
+                                        credentials:
+                                            'same-origin',
+
+                                        cache:
+                                            'no-store',
+
+                                        headers: {
+                                            'Cache-Control':
+                                                'no-cache'
+                                        }
+                                    }
+                                );
+
+
+                            if (
+                                response.status === 401
+                            ) {
+
+                                window.location.replace(
+                                    '/api/docs/login'
+                                );
+
+                                return false;
+                            }
+
+
+                            return true;
+
+                        } catch (error) {
+
+                            window.location.replace(
+                                '/api/docs/login'
+                            );
+
+                            return false;
+
+                        }
+
+                    }
+
+
+                    // ======================================
+                    // BOTÓN CERRAR SESIÓN
+                    // ======================================
+
+                    function agregarBotonLogout() {
+
+                        const topbar =
+                            document.querySelector(
+                                '.swagger-ui .topbar .topbar-wrapper'
+                            );
+
+
+                        if (!topbar) {
+                            return;
+                        }
+
+
+                        if (
+                            document.getElementById(
+                                'swagger-logout-container'
+                            )
+                        ) {
+                            return;
+                        }
+
+
+                        const container =
+                            document.createElement(
+                                'div'
+                            );
+
+                        container.id =
+                            'swagger-logout-container';
+
+
+                        const button =
+                            document.createElement(
+                                'button'
+                            );
+
+                        button.id =
+                            'swagger-logout-button';
+
+                        button.type =
+                            'button';
+
+                        button.textContent =
+                            'Cerrar sesión';
+
+
+                        button.addEventListener(
+                            'click',
+                            function () {
+
+                                window.location.replace(
+                                    '/api/docs/logout'
+                                );
+
+                            }
+                        );
+
+
+                        container.appendChild(
+                            button
+                        );
+
+                        topbar.appendChild(
+                            container
+                        );
+
+                    }
+
+
+                    // ======================================
+                    // AL CARGAR
+                    // ======================================
+
+                    window.addEventListener(
+                        'load',
+                        async function () {
+
+                            const valido =
+                                await comprobarSesion();
+
+                            if (!valido) {
+                                return;
+                            }
+
+
+                            // Swagger tarda un poco
+                            // en crear la barra superior.
+
+                            const observer =
+                                new MutationObserver(
+                                    function () {
+
+                                        agregarBotonLogout();
+
+                                    }
+                                );
+
+
+                            observer.observe(
+                                document.body,
+                                {
+                                    childList: true,
+                                    subtree: true
+                                }
+                            );
+
+
+                            agregarBotonLogout();
+
+                        }
+                    );
+
+
+                    // ======================================
+                    // BOTÓN ATRÁS / ADELANTE
+                    // ======================================
+
+                    window.addEventListener(
+                        'pageshow',
+                        function () {
+
+                            comprobarSesion();
+
+                        }
+                    );
+
+
+                    // ======================================
+                    // VOLVER A LA PESTAÑA
+                    // ======================================
+
+                    document.addEventListener(
+                        'visibilitychange',
+                        function () {
+
+                            if (
+                                document.visibilityState ===
+                                'visible'
+                            ) {
+
+                                comprobarSesion();
+
+                            }
+
+                        }
+                    );
+
+                })();
+            `,
+        },
+    );
+
     return document;
 }
