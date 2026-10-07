@@ -1,3 +1,4 @@
+import { paginationMeta } from '../../../../common/application/pagination-meta';
 import { ConsultaFisioterapeutasPort } from '../../domain/ports/consulta-fisioterapeutas.port';
 import type { ConsultaFisioterapeutas } from '../../domain/models/consulta-fisioterapeuta.model';
 export class ListarFisioterapeutasUseCase {
@@ -6,12 +7,7 @@ export class ListarFisioterapeutasUseCase {
         const { datos, total } = await this.repository.listar(consulta);
         return {
             datos,
-            paginacion: {
-                pagina: consulta.pagina,
-                limite: consulta.limite,
-                total,
-                totalPaginas: Math.ceil(total / consulta.limite),
-            },
+            meta: paginationMeta(total, consulta.pagina, consulta.limite),
         };
     }
 }

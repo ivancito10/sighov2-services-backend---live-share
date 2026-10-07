@@ -64,7 +64,8 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
         EspecialistasModule,
         FisioterapeutasModule,
         MedicamentosModule,
-        PersonasModule
+        PersonasModule,
+        SedesModule
     ],
     controllers: [
         AppController

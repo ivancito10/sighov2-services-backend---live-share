@@ -11,6 +11,10 @@ export interface FiltrosBusquedaPaciente {
 }
 
 export abstract class PacienteRepositoryPort {
+  // 1. Coincidencia exacta (first / getOne) usando índice en clave_unica
+  abstract buscarPorCi(ciTermino: string): Promise<Paciente | null>;
+
+  // 2. Búsqueda flexible / parcial / general con paginación (getManyAndCount)
   abstract buscarPacientes(
     filtros: FiltrosBusquedaPaciente,
   ): Promise<PaginatedResult<Paciente>>;

@@ -6,9 +6,9 @@ import { PersonaPort } from '../domain/persona';
 import type { FiltroPersona } from '../domain/persona';
 import {
     personasQuery,
-    buscarPersona,
     mapPersona,
 } from '../../../common/persistence/orm/lecturas';
+import { filtrarPersonas } from './filtros-personas';
 @Injectable()
 export class PostgresPersonasRepository implements PersonaPort {
     constructor(
@@ -16,10 +16,7 @@ export class PostgresPersonasRepository implements PersonaPort {
         private readonly db: DataSource,
     ) {}
     async listar(f: FiltroPersona) {
-        const [rows, total] = await buscarPersona(
-            personasQuery(this.db),
-            f.buscar,
-        )
+        const [rows, total] = await filtrarPersonas(personasQuery(this.db), f)
             .orderBy('p.primerApellido', 'ASC', 'NULLS LAST')
             .addOrderBy('p.segundoApellido', 'ASC', 'NULLS LAST')
             .addOrderBy('p.nombres', 'ASC')

@@ -118,6 +118,12 @@ const paciente = objeto({
     tipoAsegurado: texto,
     estado: { type: 'boolean' },
     institucion: texto,
+    instituciones: { type: 'array', items: objeto({
+        idInstitucion: entero,
+        nombre: texto,
+        tipoInstitucion: texto,
+        activo: { type: 'boolean' },
+    }) },
 });
 const pacienteAdministracion = objeto({
     nombres: texto,
@@ -147,25 +153,28 @@ const pagina = (item: SchemaObject, total = true) =>
     objeto({
         datos: { type: 'array', items: item },
         ...(total ? { total: { type: 'integer' } as SchemaObject } : {}),
-        paginacion: objeto({
-            pagina: entero,
-            limite: entero,
-            total: { type: 'integer' },
-            totalPaginas: { type: 'integer' },
+        meta: objeto({
+            total: { type: 'integer', minimum: 0 },
+            page: { type: 'integer', minimum: 1 },
+            lastPage: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1 },
+            hasNextPage: { type: 'boolean' },
+            hasPrevPage: { type: 'boolean' },
         }),
     });
 const json = (schema: SchemaObject) => ({ 'application/json': { schema } });
-const error = (description: string) => ({
+const error = (statusCode: number, description: string) => ({
     description,
     content: json(
         objeto({
-            statusCode: { type: 'integer' },
-            message: { oneOf: [texto, { type: 'array', items: texto }] },
+            statusCode: { type: 'integer', enum: [statusCode], example: statusCode },
+            message: { oneOf: [texto, { type: 'array', items: texto }], example: description },
+            error: { type: 'string', description: 'Etiqueta HTTP incluida por las excepciones estándar de NestJS; puede omitirse en los filtros de dominio.' },
         }),
     ),
 });
 
-// Lista explícita: ningún otro endpoint del módulo de fisioterapeutas se publica aquí.
+// Lista explícita
 export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
     const rutas: Record<
         string,
@@ -180,13 +189,23 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
         '/api/pacientes': {
             tag: 'Pacientes',
             summary:
-                'Buscar pacientes por CI, matrícula o nombre (hasta 40 resultados)',
-            schema: { type: 'array', items: paciente },
+                'Buscar pacientes por CI, matrícula o nombre (paginado)',
+            schema: objeto({
+                data: { type: 'array', items: paciente },
+                meta: objeto({
+                    total: { type: 'integer', minimum: 0, example: 45 },
+                    page: { type: 'integer', minimum: 1, example: 1 },
+                    lastPage: { type: 'integer', minimum: 1, example: 3 },
+                    limit: { type: 'integer', minimum: 1, example: 20 },
+                    hasNextPage: { type: 'boolean', example: true },
+                    hasPrevPage: { type: 'boolean', example: false },
+                }),
+            }),
         },
         '/api/pacientes/{id}': {
             tag: 'Pacientes',
             summary: 'Consultar paciente por ID de persona',
-            schema: nullable(paciente),
+            schema: paciente,
             detail: true,
         },
         '/api/s1/administracion/pacientes': {
@@ -294,8 +313,11 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                 description: 'Operación exitosa',
                 content: json(meta.schema),
             },
-            '400': error('Datos o parámetros inválidos'),
-            '401': error('Credenciales o token inválidos'),
+            '400': error(400, 'Datos o parámetros inválidos'),
+            '401': error(401, path === '/api/auth/login'
+                ? 'Credenciales inválidas o usuario inactivo'
+                : 'Token Bearer ausente, inválido o vencido'),
+            '500': error(500, 'Error interno del servidor'),
         };
         if (meta.detail) {
             op.parameters.push({
@@ -304,7 +326,10 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                 required: true,
                 schema: entero,
             });
-            op.responses['404'] = error('Registro no encontrado');
+            const recurso = path === '/api/pacientes/{id}' ? 'Paciente'
+                : path === '/api/personas/{id}' ? 'Persona'
+                : path === '/api/especialistas/{id}' ? 'Especialista' : 'Sede';
+            op.responses['404'] = error(404, `${recurso} no encontrado para el ID solicitado`);
         }
         if (meta.list) {
             op.parameters.push(
@@ -341,8 +366,22 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                     ),
                 );
         }
+        if (path === '/api/personas') {
+            op.description = 'Filtros combinables (AND). ci busca desde el inicio: 123456 coincide con 123456 y 123456ABC, no con 9912345600. ci + complemento compara ambos campos completos sin distinguir mayúsculas. buscar conserva la búsqueda general; si empieza con un número se interpreta como prefijo de CI. Para matrícula numérica use matricula.';
+            op.parameters.push(
+                query('ci', { type: 'string', maxLength: 100, example: '123456' }, 'Prefijo de CI; con complemento, CI exacto'),
+                query('complemento', { type: 'string', maxLength: 100, example: '1A' }, 'Complemento exacto; requiere ci. Ejemplo: ?ci=123456&complemento=1A'),
+                query('matricula', { type: 'string', maxLength: 100 }, 'Búsqueda parcial por matrícula'),
+                query('nombre', { type: 'string', maxLength: 100 }, 'Busca todas las palabras entre nombres y apellidos, en cualquier orden'),
+            );
+        }
         if (path === '/api/pacientes')
             op.parameters.push(
+                query('page', { type: 'integer', minimum: 1, default: 1 }, 'Número de página, empezando en 1'),
+                query('limit', { type: 'integer', minimum: 1, default: 20 }, 'Cantidad de pacientes por página'),
+                query('ci', texto, 'Filtro por CI y complemento'),
+                query('matricula', texto, 'Filtro por matrícula de seguro'),
+                query('nombre', texto, 'Filtro por nombres y apellidos'),
                 query(
                     'q',
                     texto,
@@ -357,11 +396,8 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
                     'Cantidad de resultados',
                 ),
             );
-        if (path === '/api/pacientes/{id}') {
-            delete op.responses['404'];
-            op.description =
-                'El controlador actual devuelve null si no encuentra la persona.';
-        }
+        if (path === '/api/pacientes')
+            op.description = 'Ejemplo: /api/pacientes?page=2&limit=20. Devuelve data y meta con el total y los indicadores de navegación. Sin coincidencias devuelve 200 con data vacío; el 404 corresponde al detalle por ID. Este endpoint utiliza page/limit, no pagina/limite. Si se envían varios filtros, se aplica el primero no vacío en este orden: ci, matricula, nombre, q.';
         if (path === '/api/auth/login')
             op.requestBody = {
                 required: true,
@@ -383,8 +419,9 @@ export function limitarDocumento(document: OpenAPIObject): OpenAPIObject {
         if (path.endsWith('/incorporaciones')) {
             op.description =
                 'Envía el formulario completo. idPersona es opcional: al omitirlo busca por CI y complemento, reutiliza la persona si existe o crea persona, especialista y usuario. Un idPersona explícito inexistente devuelve 404. Si hay varios especialistas o usuarios, indica sus IDs. Contrato EVENTUAL exige fechas. Conserva credenciales existentes. Ejecuta escrituras reales al pulsar Execute.';
-            op.responses['404'] = error('Persona no encontrada');
-            op.responses['409'] = error(
+            op.responses['404'] = error(404, 'La persona seleccionada no existe');
+            op.responses['503'] = error(503, 'Configuración o catálogos requeridos para el registro no disponibles');
+            op.responses['409'] = error(409,
                 'Documento duplicado o selección ambigua',
             );
             op.requestBody = {
@@ -510,8 +547,6 @@ export function configurarSwagger(app: INestApplication) {
     // también protege el JSON de OpenAPI
     app.use('/api/docs-json', swaggerAuth);
 
-    
-
     const config =
         new DocumentBuilder()
             .setTitle(
@@ -522,6 +557,7 @@ export function configurarSwagger(app: INestApplication) {
                 'Inicia sesión en Auth, copia accessToken y pégalo en Authorize. Los IDs de ejemplo deben reemplazarse por registros reales.',
             )
             .addBearerAuth()
+            
             .build();
 
 
@@ -536,8 +572,8 @@ export function configurarSwagger(app: INestApplication) {
                         PacientesModule,
                         PersonasModule,
                         EspecialistasModule,
-                        SedesModule,
                         FisioterapeutasModule,
+                        SedesModule,
                     ],
 
                     deepScanRoutes: false,

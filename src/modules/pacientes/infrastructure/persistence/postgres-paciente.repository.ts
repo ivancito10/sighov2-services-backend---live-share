@@ -4,45 +4,44 @@ import { Repository, Brackets } from 'typeorm';
 import { DB_CONNECTIONS } from '../../../../config/database.constants';
 import { PacienteRepositoryPort } from '../../domain/ports/paciente.repository.port';
 import { Paciente, PacienteInstitucionDetalle } from '../../domain/entities/paciente.entity';
-// Importa la interfaz aquí:
 import { PaginatedResult } from '../../domain/ports/paginated-result.interface';
-
-// Entidades TypeORM...
+// Entidades TypeORM
 import { PersonaTypeOrmEntity } from './entities/persona.typeorm-entity';
 import { TitularTypeOrmEntity } from './entities/titular.typeorm-entity';
 import { TitularInstitucionTypeOrmEntity } from './entities/titular-institucion.typeorm-entity';
 import { BeneficiarioTypeOrmEntity } from './entities/beneficiario.typeorm-entity';
-
+export interface FiltrosBusquedaPaciente {
+  q?: string;
+  ci?: string;
+  matricula?: string;
+  nombre?: string;
+  page?: number;
+  limit?: number;
+}
 @Injectable()
 export class PostgresPacienteRepository implements PacienteRepositoryPort {
   constructor(
     @InjectRepository(PersonaTypeOrmEntity, DB_CONNECTIONS.SIGHOV)
     private readonly personaRepo: Repository<PersonaTypeOrmEntity>,
-
     @InjectRepository(TitularTypeOrmEntity, DB_CONNECTIONS.SIGHOV)
     private readonly titularRepo: Repository<TitularTypeOrmEntity>,
-
     @InjectRepository(TitularInstitucionTypeOrmEntity, DB_CONNECTIONS.SIGHOV)
     private readonly titularInstitucionRepo: Repository<TitularInstitucionTypeOrmEntity>,
-
     @InjectRepository(BeneficiarioTypeOrmEntity, DB_CONNECTIONS.SIGHOV)
     private readonly beneficiarioRepo: Repository<BeneficiarioTypeOrmEntity>,
   ) {}
-
+  // =========================================================================
+  // 1. DETALLE COMPLETO POR ID (Resuelve árbol institucional)
+  // =========================================================================
   async buscarPorId(idPersona: number): Promise<Paciente | null> {
-    // 1. Obtener la persona y su tipo de asegurado con TypeORM
     const persona = await this.personaRepo
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.tipoAsegurado', 'ta')
       .where('p.id = :id', { id: idPersona })
       .getOne();
-
     if (!persona) return null;
-
     const tipoAseguradoStr = persona.tipoAsegurado?.nombre || 'NO ASEGURADO';
     let instituciones: PacienteInstitucionDetalle[] = [];
-
-    // 2. Resolver instituciones según reglas de negocio usando TypeORM QueryBuilder
     if (persona.idTipoAsegurado === 11 || tipoAseguradoStr.toUpperCase().includes('ESTUDIANTE')) {
       instituciones.push({
         idInstitucion: 0,
@@ -61,11 +60,9 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
         activo: true,
       });
     } else if (tipoAseguradoStr.toUpperCase().includes('TITULAR')) {
-      // Buscar titular y sus instituciones
       const titular = await this.titularRepo.findOne({
         where: { idPersona: persona.id },
       });
-
       if (titular) {
         const registros = await this.titularInstitucionRepo
           .createQueryBuilder('ti')
@@ -74,7 +71,6 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
           .orderBy('ti.estado', 'DESC')
           .addOrderBy('ti.updatedAt', 'DESC', 'NULLS LAST')
           .getMany();
-
         instituciones = registros.map((r) => ({
           idInstitucion: r.institucion.id,
           nombre: r.institucion.nombre,
@@ -83,11 +79,9 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
         }));
       }
     } else if (tipoAseguradoStr.toUpperCase().includes('BENEFICIARIO')) {
-      // Buscar el id_titular asociado al beneficiario
       const beneficiario = await this.beneficiarioRepo.findOne({
         where: { idPersona: persona.id },
       });
-
       if (beneficiario?.idTitular) {
         const registros = await this.titularInstitucionRepo
           .createQueryBuilder('ti')
@@ -96,7 +90,6 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
           .orderBy('ti.estado', 'DESC')
           .addOrderBy('ti.updatedAt', 'DESC', 'NULLS LAST')
           .getMany();
-
         instituciones = registros.map((r) => ({
           idInstitucion: r.institucion.id,
           nombre: r.institucion.nombre,
@@ -105,8 +98,6 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
         }));
       }
     }
-
-    // 3. Determinar la institución prioritaria
     const instActivaPatronal = instituciones.find(
       (i) => i.activo && i.tipoInstitucion.toUpperCase() === 'PATRONAL',
     );
@@ -116,19 +107,20 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
       primeraActiva?.nombre ||
       instituciones[0]?.nombre ||
       'PARTICULAR / SIN INSTITUCIÓN';
-
     const fechaNac = persona.fechaNacimiento
       ? new Date(persona.fechaNacimiento).toISOString().split('T')[0]
       : '';
-
     const nombreCompleto = [persona.nombres, persona.pApellido, persona.sApellido]
       .filter(Boolean)
       .join(' ')
       .trim();
-
+    const ciCompleto =
+      persona.complemento && persona.complemento.trim().length > 0
+        ? `${persona.ci}-${persona.complemento.trim()}`
+        : persona.ci || '';
     return new Paciente(
       persona.id,
-      persona.ci || '',
+      ciCompleto,
       persona.matriculaSeguro || '',
       nombreCompleto,
       fechaNac,
@@ -139,139 +131,48 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
       instituciones,
     );
   }
-
+  // =========================================================================
+  // 2. LISTADO Y BÚSQUEDA PAGINADA: Consume fn_listar_pacientes de PostgreSQL
+  // =========================================================================
   async buscarPacientes(
-    filtros: {
-      q?: string;
-      ci?: string;
-      matricula?: string;
-      nombre?: string;
-      page?: number;
-      limit?: number;
-    } = {},
+    filtros: FiltrosBusquedaPaciente = {},
   ): Promise<PaginatedResult<Paciente>> {
     const paginaActual = Math.max(1, filtros.page || 1);
+    //const registrosPorPagina = Math.min(Math.max(1, filtros.limit || 20), 100);
+    // Temporal para pruebas de velocidad: acepta el límite que mandes por query param (o 20 por defecto)
     const registrosPorPagina = Math.max(1, filtros.limit || 20);
-    const skip = (paginaActual - 1) * registrosPorPagina;
-
-    const qb = this.personaRepo
-      .createQueryBuilder('p')
-      .leftJoinAndSelect('p.tipoAsegurado', 'ta');
-
-    if (filtros.ci && filtros.ci.trim().length > 0) {
-      // 1. Búsqueda específica por Carnet y Complemento
-     const ciRaw = filtros.ci.trim().toUpperCase();
-      // Quitamos espacios y guiones para que coincida exactamente con la clave única sin separador
-      const ciLimpio = ciRaw.replace(/[-\s]/g, '');
-
-      qb.where(
-        new Brackets((bracket) => {
-          bracket
-            // 1. Coincidencia directa contra clave_unica (limpia o con guion)
-            .where('UPPER(p.claveUnica) = :ciLimpio', { ciLimpio })
-            .orWhere('UPPER(p.claveUnica) = :ciRaw', { ciRaw })
-            // 2. Coincidencia directa contra la columna CI
-            .orWhere('UPPER(p.ci) = :ciLimpio', { ciLimpio })
-            .orWhere('UPPER(p.ci) = :ciRaw', { ciRaw })
-            // 3. Búsqueda flexible (LIKE) por si el usuario escribe solo los primeros dígitos
-            .orWhere('UPPER(p.claveUnica) LIKE :ciLike', { ciLike: `${ciLimpio}%` });
-        }),
-      )
-        .orderBy('p.pApellido', 'ASC')
-        .addOrderBy('p.nombres', 'ASC');
-
-    } else if (filtros.matricula && filtros.matricula.trim().length > 0) {
-      // 2. Búsqueda específica por Matrícula
-      qb.where('UPPER(COALESCE(p.matriculaSeguro, \'\')) LIKE :mat', {
-        mat: `%${filtros.matricula.trim().toUpperCase()}%`,
-      })
-        .orderBy('p.pApellido', 'ASC')
-        .addOrderBy('p.nombres', 'ASC');
-
-    } else if (filtros.nombre && filtros.nombre.trim().length > 0) {
-      // 3. Búsqueda específica por Nombre o Apellidos
-      qb.where(
-        "UPPER(CONCAT(p.nombres, ' ', p.pApellido, ' ', COALESCE(p.sApellido, ''))) LIKE :nom",
-        {
-          nom: `%${filtros.nombre.trim().toUpperCase()}%`,
-        },
-      )
-        .orderBy('p.pApellido', 'ASC')
-        .addOrderBy('p.nombres', 'ASC');
-
-    } else if (filtros.q && filtros.q.trim().length > 0) {
-      const rawTerm = filtros.q.trim();
-      const termUpper = `%${rawTerm.toUpperCase()}%`;
-      const termClean = rawTerm.replace(/[-\s]/g, '').toUpperCase();
-
-      qb.where(
-        new Brackets((bracket) => {
-          bracket
-            // Búsqueda directa en clave_unica y CI
-            .where('UPPER(p.claveUnica) LIKE :termClean', { termClean: `%${termClean}%` })
-            .orWhere('UPPER(p.ci) LIKE :term', { term: termUpper })
-            // Matrícula
-            .orWhere('UPPER(p.matriculaSeguro) LIKE :term', { term: termUpper })
-            // Nombres y apellidos
-            .orWhere(
-              "UPPER(CONCAT(p.nombres, ' ', p.pApellido, ' ', COALESCE(p.sApellido, ''))) LIKE :term",
-              { term: termUpper },
-            );
-        }),
-      )
-        .orderBy('p.pApellido', 'ASC')
-        .addOrderBy('p.nombres', 'ASC');
-
-    } else {
-      // Sin filtros: orden natural
-      qb.orderBy('p.id', 'DESC');
-    }
-
-    // Paginación con TypeORM
-    const [personas, total] = await qb
-      .skip(skip)
-      .take(registrosPorPagina)
-      .getManyAndCount();
-
-    const data = personas.map((p) => {
-      const nombreCompleto = [p.nombres, p.pApellido, p.sApellido]
-        .filter(Boolean)
-        .join(' ')
-        .trim();
-
-      const fechaNac = p.fechaNacimiento
-        ? new Date(p.fechaNacimiento).toISOString().split('T')[0]
+    const offset = (paginaActual - 1) * registrosPorPagina;
+    // Llamada nativa a la función en PostgreSQL
+    const rawRows = await this.personaRepo.query(
+      `SELECT * FROM administracion.fn_listar_pacientes($1, $2, $3, $4, $5, $6)`,
+      [
+        filtros.q?.trim() || null,
+        filtros.ci?.trim() || null,
+        filtros.matricula?.trim() || null,
+        filtros.nombre?.trim() || null,
+        registrosPorPagina,
+        offset,
+      ],
+    );
+    const total = rawRows.length > 0 ? Number(rawRows[0].total_registros) : 0;
+    const data = rawRows.map((row: any) => {
+      const fechaNac = row.fecha_nacimiento
+        ? new Date(row.fecha_nacimiento).toISOString().split('T')[0]
         : '';
-
-      const tipoStr = p.tipoAsegurado?.nombre || 'TITULAR';
-
-      let instRapida = 'PARTICULAR / SIN INSTITUCIÓN';
-      if (p.idTipoAsegurado === 11 || tipoStr.toUpperCase().includes('ESTUDIANTE')) {
-        instRapida = 'APORTE UMSA ESTUDIANTE';
-      } else if ([9, 10].includes(p.idTipoAsegurado) || tipoStr.toUpperCase().includes('INTERIOR')) {
-        instRapida = 'SEGURO SOCIAL UNIVERSITARIO DEL INTERIOR';
-      }
-
-      const ciCompleto = p.complemento && p.complemento.trim().length > 0
-        ? `${p.ci}-${p.complemento.trim()}`
-        : (p.ci || '');
-
       return new Paciente(
-        p.id,
-        ciCompleto,
-        p.matriculaSeguro || '',
-        nombreCompleto,
+        row.id_persona,
+        row.ci,
+        row.matricula,
+        row.nombre_completo,
         fechaNac,
-        p.sexo || '',
-        tipoStr,
-        p.afiliado ?? true,
-        instRapida,
-        [],
+        row.sexo,
+        row.tipo_asegurado,
+        row.afiliado,
+        row.institucion,
+        [], // Optimizado sin array pesado para listados
       );
     });
-
     const lastPage = Math.ceil(total / registrosPorPagina) || 1;
-
     return {
       data,
       meta: {
@@ -284,7 +185,34 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
       },
     };
   }
-
+  // =========================================================================
+  // 3. BÚSQUEDA DIRECTA POR CI: Mantiene getOne() e Índices B-Tree
+  // =========================================================================
+  async buscarPorCi(ciTermino: string): Promise<Paciente | null> {
+    const raw = ciTermino.trim().toUpperCase();
+    const clean = raw.replace(/[-\s]/g, '');
+    const persona = await this.personaRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.tipoAsegurado', 'ta')
+      .where('p.idTipoAsegurado IS NOT NULL AND p.idTipoAsegurado > 0')
+      .andWhere(
+        new Brackets((bracket) => {
+          bracket
+            .where('p.claveUnica = :clean', { clean })
+            .orWhere('p.claveUnica = :raw', { raw })
+            .orWhere('p.ci = :clean', { clean })
+            .orWhere('p.ci = :raw', { raw });
+        }),
+      )
+      .getOne();
+    if (!persona) {
+      return null;
+    }
+    return await this.buscarPorId(persona.id);
+  }
+  // =========================================================================
+  // 4. LISTADO RÁPIDO ADMINISTRACIÓN
+  // =========================================================================
   async listarPacientesAdministracion(limite: number = 50): Promise<any[]> {
     const personas = await this.personaRepo
       .createQueryBuilder('p')
@@ -293,7 +221,6 @@ export class PostgresPacienteRepository implements PacienteRepositoryPort {
       .orderBy('p.id', 'DESC')
       .take(limite)
       .getMany();
-
     return personas.map((p) => ({
       nombres: p.nombres || '',
       p_apellido: p.pApellido || '',

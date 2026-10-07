@@ -1,3 +1,4 @@
+import { paginationMeta } from '../../../common/application/pagination-meta';
 import { SedePort, SedeError, validarId } from '../domain/sede';
 
 export class ConsultarSedesUseCase {
@@ -25,12 +26,7 @@ export class ConsultarSedesUseCase {
         return {
             datos,
             total,
-            paginacion: {
-                pagina,
-                limite,
-                total,
-                totalPaginas: Math.ceil(total / limite),
-            },
+            meta: paginationMeta(total, pagina, limite),
         };
     }
     async obtener(id: string) {

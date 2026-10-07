@@ -26,6 +26,10 @@ export interface FiltroPersona {
     pagina: number;
     limite: number;
     buscar: string;
+    ci?: string;
+    complemento?: string;
+    matricula?: string;
+    nombre?: string;
 }
 export abstract class PersonaPort {
     abstract listar(

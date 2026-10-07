@@ -1,3 +1,4 @@
+import { paginationMeta } from '../../../../common/application/pagination-meta';
 import { Injectable } from '@nestjs/common';
 import { EspecialistaRepositoryPort } from '../../domain/ports/especialista.repository.port';
 import type { ConsultaEspecialistas } from '../../domain/ports/especialista.repository.port';
@@ -10,12 +11,7 @@ export class GetEspecialistasActivosUseCase {
         const { datos, total } = await this.repo.listarActivos(consulta);
         return {
             datos,
-            paginacion: {
-                pagina: consulta.pagina,
-                limite: consulta.limite,
-                total,
-                totalPaginas: Math.ceil(total / consulta.limite),
-            },
+            meta: paginationMeta(total, consulta.pagina, consulta.limite),
         };
     }
 }
